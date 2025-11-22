@@ -70,7 +70,7 @@ def get_extension_base_path() -> Path:
     """
     Get the directory the extension is installed in.
     """
-    path = f"{os.getcwd()}{os.sep}extensions{os.sep}sd-wildcard-gallery"
+    path = f"{os.getcwd()}{os.sep}extensions{os.sep}sd-wildcard-prompt-gallery"
     assert Path(path).is_dir()  # sanity check
     return Path(path)
 

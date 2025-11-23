@@ -345,6 +345,7 @@ def wildcard_selection_changed(selection_wildcard):
     obj = wildcard_json.create_new_wildcard(wildcard)
     # set wildcard to gen data
     wildcard_data.set_gen_data(wildcard_data.key_wildcard, wildcard)
+    print(wildcard_data.get_gen_data(wildcard_data.key_wildcard))
     # selection_prompt
     
     # set initial gen data
@@ -367,7 +368,7 @@ def wildcard_selection_changed(selection_wildcard):
         images.append((Image.open(path, "r", None), cap))
 
     # return data for ui
-    return "__" + wildcard + "__", obj[wildcard_json.key_prompt], obj[wildcard_json.key_prompt_second], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_fontsize], obj[wildcard_json.key_write_to_image], images, obj[wildcard_json.key_image_generation_info], obj[wildcard_json.key_image_generation_html]
+    return "__" + wildcard + "__", obj[wildcard_json.key_prompt], obj[wildcard_json.key_prompt_second], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_fontsize], obj[wildcard_json.key_write_to_image], images, obj[wildcard_json.key_image_generation_info], obj[wildcard_json.key_image_generation_html], obj[wildcard_json.key_prompt] + "__" + wildcard + "__" + obj[wildcard_json.key_prompt_second]
 
 def change_sampler_name(sampler_name):
     wildcard_data.set_gen_data(wildcard_json.key_sampler, sampler_name)   
@@ -696,7 +697,7 @@ def on_ui_tabs():
             toprow.selection_wildcard.change(
                 fn=wildcard_selection_changed,
                 inputs=[toprow.selection_wildcard],
-                outputs=[toprow.prompt_wildcard, toprow.prompt, toprow.prompt_second, toprow.negative_prompt, steps, sampler_name, scheduler, seed, width, height, batch_size, cfg_scale, font_size, enable_image_writing, output_panel.gallery, output_panel.generation_info,output_panel.infotext]
+                outputs=[toprow.prompt_wildcard, toprow.prompt, toprow.prompt_second, toprow.negative_prompt, steps, sampler_name, scheduler, seed, width, height, batch_size, cfg_scale, font_size, enable_image_writing, output_panel.gallery, output_panel.generation_info,output_panel.infotext, toprow.prompt_combined]
             )
 
             sampler_name.change(

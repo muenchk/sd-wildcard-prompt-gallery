@@ -381,11 +381,7 @@ def wildcard_selection_changed(selection_wildcard):
     image_generation_info, image_generation_html = wildcard_misc.get_initial_generation_info(obj[wildcard_json.key_image_array])
 
     # return data for ui
-<<<<<<< HEAD
-    return "__" + wildcard + "__", obj[wildcard_json.key_prompt], obj[wildcard_json.key_prompt_second], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_fontsize], obj[wildcard_json.key_write_to_image], images, obj[wildcard_json.key_image_generation_info], obj[wildcard_json.key_image_generation_html], obj[wildcard_json.key_prompt] + "__" + wildcard + "__" + obj[wildcard_json.key_prompt_second]
-=======
     return "__" + wildcard + "__", obj[wildcard_json.key_prompt], obj[wildcard_json.key_prompt_second], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_fontsize], obj[wildcard_json.key_write_to_image], images, image_generation_info, image_generation_html, obj[wildcard_json.key_prompt] + "__" + wildcard + "__" + obj[wildcard_json.key_prompt_second]
->>>>>>> 20db99b (changes to json, to include proper generation info, and support new prompt galleries.)
 
 def change_sampler_name(sampler_name):
     wildcard_data.set_gen_data(wildcard_json.key_sampler, sampler_name)   

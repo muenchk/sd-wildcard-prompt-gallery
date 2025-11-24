@@ -24,6 +24,7 @@ from modules.paths_internal import roboto_ttf_file
 
 from scripts.wildcard_data import get_gen_data, get_wildcard_manager, key_wildcard, key_prompt, key_prompt_second
 import scripts.wildcard_json as wildcard_json
+import scripts.wildcard_misc as wildcard_misc
 
 from dynamicprompts.parser.parse import ParserConfig
 from dynamicprompts.generators.promptgenerator import GeneratorException
@@ -303,84 +304,11 @@ def write_images(p, processed):
         if get_gen_data(wildcard_json.key_write_to_image):
             images.save_image(processed.images[i][0], p.outpath_samples, "", processed.all_seeds[i], processed.all_prompts[i], opts.samples_format, info=processed.infotext(p, i), p=p)
 
-def delete_old_images(wildcard, imagelist):
-    # delete the passed old files
-    dir = wildcard_json.get_base_dir()
-    if isinstance(imagelist, dict):
-        #1234for obj in imagelist:
-        for cap, img in imagelist.items():
-            #1234path = os.path.join(dir, obj[wildcard_json.key_ia_filename])
-            path = os.path.join(dir, img)
-            print(path)
-            if (os.path.exists(path)):
-                print("exists")
-            try:
-                os.remove(path)
-                os.removedirs(os.path.dirname(path))
-            except Exception as e:
-                pass
-    elif isinstance(imagelist, collections.abc.Iterable):
-        for img in imagelist:
-            path = os.path.join(dir, img)
-            print(path)
-            if (os.path.exists(path)):
-                print("exists")
-            try:
-                os.remove(path)
-                os.removedirs(os.path.dirname(path))
-            except Exception as e:
-                pass
-    else:
-        print("[ERROR] [WG] imagelist for deletion not of known type")
-
-
-def save_images(p, processed, generation_info_js, gen_html, mode):
-    # get image num and pathes
-    num = len(processed.images)
-    dir = wildcard_json.get_base_dir()
-    wildcard = get_gen_data(key_wildcard)
-    wildcard_path = wildcard.replace('/', os.path.sep)
-    wildcard_path = wildcard_path.replace('\\', os.path.sep)
-    image_path = os.path.join(dir, wildcard_path)
-    card = wildcard_json.get_wildcard(wildcard)
-    # delete old images if we are generating all combinations
-    if mode == 1:
-        delete_old_images(wildcard, card[wildcard_json.key_image_array])
-    # reset image list if we are generating all new images
-    if mode == 1:
-        card[wildcard_json.key_image_array] = {}
-    # create directories
-    try:
-        os.makedirs(image_path)
-    except Exception:
-        pass
-
-    to_delete = []
-
-    # save the files and store their information
-    for i in range(num):
-        fullfn, txt_fullfn = images.save_image(processed.images[i][0], image_path, "", processed.all_seeds[i], processed.all_prompts[i], opts.samples_format, info=processed.infotext(p, i), p = p)
-        imgobj = {}
-        print("i: " + str(i) + "filename: " + fullfn[len(str(dir))+1:] + "caption: " + processed.images[i][1])
-        imgobj[wildcard_json.key_ia_filename] = fullfn[len(str(dir))+1:]
-        imgobj[wildcard_json.key_ia_caption] = processed.images[i][1]
-        #1234card[wildcard_json.key_image_array].append(imgobj)
-        if processed.images[i][1] in card[wildcard_json.key_image_array]:
-            # if image exists, add it to the deletion
-            to_delete.append(card[wildcard_json.key_image_array][processed.images[i][1]])
-        card[wildcard_json.key_image_array][processed.images[i][1]] = fullfn[len(str(dir))+1:]
-    wildcard_json.update_wildcard(wildcard, wildcard_json.key_image_array, card[wildcard_json.key_image_array])
-
-    if mode == 3 and len(to_delete) > 0:
-        delete_old_images(wildcard, to_delete)
-    wildcard_json.update_wildcard(wildcard, wildcard_json.key_image_generation_info, generation_info_js)
-    wildcard_json.update_wildcard(wildcard, wildcard_json.key_image_generation_html, gen_html)
-
-    wildcard_json.write_to_config()
-
 from modules.scripts import AlwaysVisible
 
 scripts_custom:modules.scripts.ScriptRunner = None
+
+scripts_gallery:modules.scripts.ScriptRunner = None
 
 scripts_data = []
 postprocessing_scripts_data = []
@@ -397,15 +325,25 @@ def wrap_call(func, filename, funcname, *args, default=None, **kwargs):
 class ScriptRunnerCust(modules.scripts.ScriptRunner):
     def __init__(self):
         super().__init__()
+        self.disabled_scripts:list[str] = []
 
     def process(self, p):
         for script in self.ordered_scripts('process'):
-            if "dynamic_prompting" not in script.filename:
+            found:bool = False
+            for dis in self.disabled_scripts:
+                if dis in script.filename:
+                    found=True
+                    break
+            if found == False:
+            #if "dynamic_prompting" not in script.filename:
                 try:
                     script_args = p.script_args[script.args_from:script.args_to]
                     script.process(p, *script_args)
                 except Exception:
                     errors.report(f"Error running process: {script.filename}", exc_info=True)
+                    
+    def add_disabled_script(self, script:str):
+        self.disabled_scripts.append(script)
 
 def load_scripts():
     global scripts_data
@@ -417,9 +355,13 @@ def load_scripts():
             
 
     global scripts_custom
+    global scripts_gallery
 
     #print(scripts_data)
     scripts_custom = ScriptRunnerCust()
+    scripts_custom.add_disabled_script("dynamic_prompting")
+
+    scripts_gallery = ScriptRunnerCust()
     #scripts_custom = modules.scripts.ScriptRunner()
 
 from modules.infotext_utils import create_override_settings_dict, parse_generation_parameters
@@ -492,6 +434,98 @@ def txt2img_function(id_task: str, request: gr.Request, mode:int, *args):
         comments: comments in html form
     """
 
+    print("step 1")
+
+    p = txt2img_create_processing(id_task, request, *args)
+
+    p.steps = get_gen_data(wildcard_json.key_sampling_steps)
+    p.sampler_name = get_gen_data(wildcard_json.key_sampler)
+    p.scheduler = get_gen_data(wildcard_json.key_scheduler)
+    p.seed = get_gen_data(wildcard_json.key_seed)
+    p.do_not_save_grid = True
+
+    print("step 2")
+
+    with closing(p):
+        #processed = modules.scripts.scripts_txt2img.run(p, *p.script_args)
+        processed = scripts_custom.run(p, *p.script_args)
+
+        print("step 3")
+
+        # resolve the wildcards
+        update_prompts(p, mode)
+
+        print("step 4")
+
+        for prompt in p.all_prompts:
+            print(prompt)
+        
+        if processed is None:
+            processed = processing.process_images(p)
+
+        print("step 5")
+
+        # write on images
+        write_images(p, processed)
+
+    print("step 6")
+
+    shared.total_tqdm.clear()
+
+    generation_info_js = processed.js()
+    if opts.samples_log_stdout:
+        print(generation_info_js)
+
+    gen_html = plaintext_to_html(processed.info)
+
+    if (mode != 2):
+        wildcard_misc.save_images(p, processed, generation_info_js, gen_html, mode)
+
+    if opts.do_not_show_images:
+        processed.images = []
+
+    return processed.images + processed.extra_images, generation_info_js, gen_html, plaintext_to_html(processed.comments, classname="comments")
+
+def txt2img(id_task: str, request: gr.Request, *args):
+    print("generate")
+    wildcard_json.writeback_wildcard_changes()
+    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 1, *args)
+
+def txt2img_samples(id_task: str, request: gr.Request, *args):
+    print("samples")
+    wildcard_json.writeback_wildcard_changes()
+    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 2, *args)
+
+def txt2img_samples_save(id_task:str, request: gr.Request, *args):
+    print("samples save")
+    wildcard_json.writeback_wildcard_changes()
+    #return main_thread.run_and_wait_result(txt2img_function, id_task, request, 3, *args)
+    return txt2img_function(id_task, request, 3, *args)
+
+
+    
+
+def txt2img_function_prompt(id_task: str, request: gr.Request, *args):
+    """
+    This function does the actual top-level txt2img work.
+    It adapts running parameters to our needs, takes care of storing images, and
+    getting individual prompts from the wildcard prompt.
+
+    It can be operated in three modi yielding different results.
+
+    Parameters:
+        mode (int): The mode of operation of function determining what images are generated, how many and whether they are saved, and how they are saved. 
+            [1] txt2img with all prompt combinations as result. images are saved and are added to the database, after all older images are deleted.
+            [2] txt2img with random prompts and [batch_count] images. images are NOT saved and DO NOT override existing images.
+            [3] txt2img with random prompts and [batch_count] images. images ARE saved and DO override existing images. existing images are NOT cleared prior to this operation.
+    
+    Returns:
+        images: images that have been generated
+        json: json containing image generation info
+        info: info in html form
+        comments: comments in html form
+    """
+
     p = txt2img_create_processing(id_task, request, *args)
 
     p.steps = get_gen_data(wildcard_json.key_sampling_steps)
@@ -524,22 +558,12 @@ def txt2img_function(id_task: str, request: gr.Request, mode:int, *args):
 
     gen_html = plaintext_to_html(processed.info)
 
-    if (mode != 2):
-        save_images(p, processed, generation_info_js, gen_html, mode)
-
     if opts.do_not_show_images:
         processed.images = []
 
     return processed.images + processed.extra_images, generation_info_js, gen_html, plaintext_to_html(processed.comments, classname="comments")
 
-def txt2img(id_task: str, request: gr.Request, *args):
-    wildcard_json.writeback_changes()
-    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 1, *args)
-
-def txt2img_samples(id_task: str, request: gr.Request, *args):
-    wildcard_json.writeback_changes()
-    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 2, *args)
-
-def txt2img_samples_save(id_task:str, request: gr.Request, *args):
-    wildcard_json.writeback_changes()
-    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 3, *args)
+def txt2img_prompt(id_task: str, request: gr.Request, *args):
+    wildcard_json.writeback_gallery_changes()
+    print("txt2img prompt version")
+    return main_thread.run_and_wait_result(txt2img_function_prompt, id_task, request, *args)

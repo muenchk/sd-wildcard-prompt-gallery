@@ -5,12 +5,15 @@ from modules import shared, util, ui_tempdir, call_queue
 from modules.shared import opts, cmd_opts
 import modules.infotext_utils as parameters_copypaste
 from modules import processing, infotext_utils, images
+import modules
+import modules.scripts
 import json
 import scripts.prompt_gallery as prompt_gallery
 
 import gradio as gr
 
 import os
+import os.path
 
 import scripts.wildcard_txt2img as wildcard_txt2img
 import scripts.wildcard_json as wildcard_json
@@ -50,6 +53,24 @@ def delete_old_images(imagelist):
                 pass
     else:
         print("[ERROR] [WG] imagelist for deletion not of known type")
+
+def delete_gallery(path):
+    for root,dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            try:
+                os.remove(os.path.join(root, name))
+            except:
+                pass
+        for dir in dirs:
+            try:
+                os.removedirs(os.path.join(root, dir))
+            except Exception as e:
+                print(e)
+    try:
+        os.removedirs(path)
+    except Exception as e:
+        print(e)
+        
 
 
 def save_images(p, processed, generation_info_js, gen_html, mode):
@@ -129,10 +150,13 @@ def save_images(p, processed, generation_info_js, gen_html, mode):
     wildcard_json.write_to_config()
 
 
-def save_image_to_gallery(images, generation_info, html_info, img_index):
-    generation_info = json.loads(generation_info)
+def save_image_to_gallery(image, generation_info_s, img_index):
+    generation_info = json.loads(generation_info_s)
     if img_index < 0 or img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" in generation_info:
         return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
+    return save_image_to_gallery_intern(image[img_index], generation_info_s, img_index)
+def save_image_to_gallery_intern(img, generation_info, img_index):
+    generation_info = json.loads(generation_info)
     dir = wildcard_json.get_base_dir() / "galleries"
     gallery_name = prompt_gallery.get_gallery_name()
     if (gallery_name == ""):
@@ -141,11 +165,14 @@ def save_image_to_gallery(images, generation_info, html_info, img_index):
     gallery = wildcard_json.get_gallery(gallery_name)
 
     to_delete = []
-    
-    fullfn, txt_fullfn = images.save_image(images[img_index][0] if isinstance(images[img_index], tuple) else images[img_index], image_path, "", generation_info[wildcard_json.key_all_seeds][img_index], generation_info[wildcard_json.key_allprompts][img_index], opts.samples_format, info=generation_info[wildcard_json.key_infotexts][img_index])
+
+    fullfn, txt_fullfn = images.save_image(img[0] if isinstance(img, tuple) else img, image_path, "", generation_info[wildcard_json.key_all_seeds][img_index], generation_info[wildcard_json.key_all_prompts][img_index], opts.samples_format, info=generation_info[wildcard_json.key_infotexts][img_index])
     imgobj={}
-    caption = images[img_index][1] if isinstance(images[img_index], tuple) else "img_" + str(random.randint(0, 9223372036854775806))
-    print("filename: " + fullfn[len(str(dir))+1:] + "caption: " + caption)
+    caption = img[1] if isinstance(img, tuple) else "img_" + str(random.randint(0, 9223372036854775806))
+    # check if caption already exists and add a random number to the end until it doesn't
+    if caption in gallery[wildcard_json.key_image_array]:
+        caption = caption + "_" + str(random.randint(0, 9223372036854775806))
+
     imgobj[wildcard_json.key_ia_filename] = fullfn[len(str(dir))+1:]
     imgobj[wildcard_json.key_ia_caption] = caption
     if caption in gallery[wildcard_json.key_image_array]:
@@ -161,6 +188,8 @@ def save_image_to_gallery(images, generation_info, html_info, img_index):
     image_details[wildcard_json.key_width] = generation_info[wildcard_json.key_width]
     image_details[wildcard_json.key_height] = generation_info[wildcard_json.key_height]
     image_details[wildcard_json.key_sampler] = generation_info[wildcard_json.key_sampler]
+    if wildcard_json.key_scheduler in generation_info:
+        image_details[wildcard_json.key_scheduler] = generation_info[wildcard_json.key_scheduler]
     image_details[wildcard_json.key_cfg] = generation_info[wildcard_json.key_cfg]
     image_details[wildcard_json.key_sampling_steps] = generation_info[wildcard_json.key_sampling_steps]
     image_details[wildcard_json.key_batch_size] = generation_info[wildcard_json.key_batch_size]
@@ -184,11 +213,32 @@ def save_image_to_gallery(images, generation_info, html_info, img_index):
     gallery[wildcard_json.key_image_array][caption] = image_details
 
     
-    wildcard_json.update_gallery(gallery, wildcard_json.key_image_array, gallery[wildcard_json.key_image_array])
+    wildcard_json.update_gallery(gallery_name, wildcard_json.key_image_array, gallery[wildcard_json.key_image_array])
 
     delete_old_images(to_delete)
 
     wildcard_json.write_to_config()
+    
+def remove_image_from_gallery(image, generation_info, html_info, img_index):
+    generation_info = json.loads(generation_info)
+    if img_index < 0 or img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" not in generation_info:
+        return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
+    dir = wildcard_json.get_base_dir() / "galleries"
+    gallery_name = prompt_gallery.get_gallery_name()
+    if (gallery_name == ""):
+        return
+    image_path = os.path.join(dir, gallery_name)
+    gallery = wildcard_json.get_gallery(gallery_name)
+
+    to_delete = [gallery[wildcard_json.key_image_array][image[img_index][1]]]
+
+    delete_old_images(to_delete)
+    del gallery[wildcard_json.key_image_array][image[img_index][1]]
+
+    del image[img_index]
+    image_generation_info, image_generation_html = get_initial_generation_info(gallery[wildcard_json.key_image_array])
+
+    return image, image_generation_info, image_generation_html
     
 
 def get_initial_generation_info(imagelist):
@@ -263,8 +313,10 @@ def create_wg_output_panel(tabname, outdir):
             'extras': ToolButton('📐', elem_id=f'{tabname}_send_to_extras', tooltip="Send image and generation parameters to extras tab.")
         }
 
-        if tabname == "wg_prompt_tab":
+        send_to_txt2img = gr.Button("send to txt2img", elem_id=f'{tabname}_send_to_txt2img', tooltip="Send image and generation parameters to txt2img tab.")
+        if tabname == "wg_prompt":
             add_to_gallery = gr.Button("Add to gallery", elem_id=f"{tabname}_add_to_gallery", tooltip="Add the image to the gallery")
+            remove_from_gallery = gr.Button("Remove from Gallery", elem_id=f"{tabname}_remove_from_gallery", tooltip="Remove image from image gallery")
             
 
         
@@ -324,24 +376,32 @@ def create_wg_output_panel(tabname, outdir):
             ]
         )
 
-        if tabname == "wg_prompt_tab":
+        if tabname == "wg_prompt":
             add_to_gallery.click(
                 fn=save_image_to_gallery,
+                _js="function(x, y, z){ return [x, y, selected_gallery_index()] }",
+                inputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext],
+                show_progress=False
+            )
+            remove_from_gallery.click(
+                fn=remove_image_from_gallery,
                 _js="function(w, x, y, z){ return [w, x, y, selected_gallery_index()] }",
                 inputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext, output_panel.infotext],
+                outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext],
                 show_progress=False
             )
     
-    paste_field_names = []
-    if (tabname == "wg_gallery_tab"):
-        paste_field_names = wildcard_txt2img.scripts_custom.paste_field_names
-    elif (tabname == "wg_prompt_tab"):
-        paste_field_names = wildcard_txt2img.scripts_gallery.paste_field_names
+    paste_field_names_txt = modules.scripts.scripts_txt2img.paste_field_names
+    paste_field_names_img = modules.scripts.scripts_img2img.paste_field_names
+
+    parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
+            paste_button=send_to_txt2img, tabname='txt2img', source_image_component=output_panel.gallery,source_text_component=output_panel.generation_info
+        ))
 
     for paste_tabname, paste_button in buttons.items():
         parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
-            paste_button=paste_button, tabname=paste_tabname, source_tabname="txt2img" if tabname == "txt2img" else None, source_image_component=output_panel.gallery,
-            paste_field_names=paste_field_names
+            paste_button=paste_button, tabname=paste_tabname, source_image_component=output_panel.gallery,source_text_component=output_panel.generation_info,
+            paste_field_names=paste_field_names_img
         ))
 
     return output_panel

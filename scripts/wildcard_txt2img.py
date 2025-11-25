@@ -366,7 +366,7 @@ def load_scripts():
 
 from modules.infotext_utils import create_override_settings_dict, parse_generation_parameters
 
-def txt2img_create_processing(id_task: str, request: gr.Request, prompt: str, negative_prompt: str, prompt_styles, n_iter: int, batch_size: int, cfg_scale: float, distilled_cfg_scale: float, height: int, width: int, enable_hr: bool, denoising_strength: float, hr_scale: float, hr_upscaler: str, hr_second_pass_steps: int, hr_resize_x: int, hr_resize_y: int, hr_checkpoint_name: str, hr_additional_modules: list, hr_sampler_name: str, hr_scheduler: str, hr_prompt: str, hr_negative_prompt, hr_cfg: float, hr_distilled_cfg: float, override_settings_texts, *args, force_enable_hr=False):
+def txt2img_create_processing(id_task: str, request: gr.Request, scripts:modules.scripts.ScriptRunner , prompt: str, negative_prompt: str, prompt_styles, n_iter: int, batch_size: int, cfg_scale: float, distilled_cfg_scale: float, height: int, width: int, enable_hr: bool, denoising_strength: float, hr_scale: float, hr_upscaler: str, hr_second_pass_steps: int, hr_resize_x: int, hr_resize_y: int, hr_checkpoint_name: str, hr_additional_modules: list, hr_sampler_name: str, hr_scheduler: str, hr_prompt: str, hr_negative_prompt, hr_cfg: float, hr_distilled_cfg: float, override_settings_texts, *args, force_enable_hr=False):
     override_settings = create_override_settings_dict(override_settings_texts)
 
     if force_enable_hr:
@@ -402,7 +402,7 @@ def txt2img_create_processing(id_task: str, request: gr.Request, prompt: str, ne
         override_settings=override_settings,
     )
 
-    p.scripts = scripts_custom
+    p.scripts = scripts
     p.script_args = args
 
     p.user = request.username
@@ -436,7 +436,7 @@ def txt2img_function(id_task: str, request: gr.Request, mode:int, *args):
 
     print("step 1")
 
-    p = txt2img_create_processing(id_task, request, *args)
+    p = txt2img_create_processing(id_task, scripts_custom, request, *args)
 
     p.steps = get_gen_data(wildcard_json.key_sampling_steps)
     p.sampler_name = get_gen_data(wildcard_json.key_sampler)
@@ -526,29 +526,27 @@ def txt2img_function_prompt(id_task: str, request: gr.Request, *args):
         comments: comments in html form
     """
 
-    p = txt2img_create_processing(id_task, request, *args)
+    p = txt2img_create_processing(id_task, request, scripts_gallery, *args)
 
-    p.steps = get_gen_data(wildcard_json.key_sampling_steps)
-    p.sampler_name = get_gen_data(wildcard_json.key_sampler)
-    p.scheduler = get_gen_data(wildcard_json.key_scheduler)
-    p.seed = get_gen_data(wildcard_json.key_seed)
     p.do_not_save_grid = True
 
     with closing(p):
         #processed = modules.scripts.scripts_txt2img.run(p, *p.script_args)
-        processed = scripts_custom.run(p, *p.script_args)
+        processed = scripts_gallery.run(p, *p.script_args)
 
         # resolve the wildcards
-        update_prompts(p, mode)
+        #update_prompts(p, mode)
 
-        for prompt in p.all_prompts:
-            print(prompt)
+        #for prompt in p.all_prompts:
+        #    print(prompt)
         
         if processed is None:
             processed = processing.process_images(p)
 
         # write on images
-        write_images(p, processed)
+        for i in range(len(processed.all_prompts)):
+            processed.images[i] = processed.images[i], processed.all_prompts[i]
+        #write_images(p, processed)
 
     shared.total_tqdm.clear()
 

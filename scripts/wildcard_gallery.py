@@ -445,6 +445,7 @@ def on_ui_tabs():
 
     scripts.scripts_current = wildcard_txt2img.scripts_custom
     wildcard_txt2img.scripts_custom.initialize_scripts(is_img2img=False)
+    wildcard_txt2img.scripts_gallery.initialize_scripts(is_img2img=False)
 
     with gr.Blocks(analytics_enabled=False, head=canvas_head) as wildcard_gallery:
         with gr.Tab(label="Wildcard Gallery", id="wg_gallery_tab") as wg_gallery_tab:
@@ -616,11 +617,7 @@ def on_ui_tabs():
             toprow.selection_wildcard.change(
                 fn=wildcard_selection_changed,
                 inputs=[toprow.selection_wildcard],
-<<<<<<< HEAD
-                outputs=[toprow.prompt_wildcard, toprow.prompt, toprow.prompt_second, toprow.negative_prompt, steps, sampler_name, scheduler, seed, width, height, batch_size, cfg_scale, font_size, enable_image_writing, output_panel.gallery, output_panel.generation_info,output_panel.infotext, toprow.prompt_combined]
-=======
                 outputs=[toprow.prompt_wildcard, toprow.prompt, toprow.prompt_second, toprow.negative_prompt, steps, sampler_name, scheduler, seed, width, height, batch_size, cfg_scale, font_size, enable_image_writing, output_panel.gallery, output_panel.generation_info, output_panel.infotext, toprow.prompt_combined]
->>>>>>> 20db99b (changes to json, to include proper generation info, and support new prompt galleries.)
             )
 
             sampler_name.change(

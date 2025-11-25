@@ -36,9 +36,9 @@ from modules.ui import ordered_ui_categories, calc_resolution_hires, update_toke
 from modules_forge.forge_canvas.canvas import ForgeCanvas, canvas_head
 from modules import ui_extra_networks, ui_toprow, progress, util, ui_tempdir, call_queue
 import modules.infotext_utils as parameters_copypaste
-from modules.infotext_utils import image_from_url_text, PasteField
+from modules.infotext_utils import image_from_url_text, PasteField, parse_generation_parameters
 from contextlib import ExitStack
-from modules.call_queue import wrap_gradio_gpu_call, wrap_queued_call, wrap_gradio_call
+from modules.call_queue import wrap_gradio_gpu_call, wrap_queued_call, wrap_gradio_call, wrap_gradio_call_no_job
 import modules.txt2img
 from modules_forge import main_entry, forge_space
 
@@ -78,27 +78,93 @@ gallery_selected:str = ""
 def get_gallery_name()-> str:
     return gallery_selected
 
+def click_remove_all_images():
+    # find gallery
+    gallery = wildcard_json.get_gallery(gallery_selected)
+    if gallery == {}:
+        return [], "", ""
+    
+    dir = wildcard_json.get_base_dir() / "galleries"
+    if (gallery_selected == ""):
+        return
+    image_path = os.path.join(dir, gallery_selected)
+    wildcard_misc.delete_gallery(image_path)
+    gallery[wildcard_json.key_image_array] = {}
+    wildcard_json.update_gallery(gallery_selected, wildcard_json.key_image_array, gallery[wildcard_json.key_image_array])
+
+    wildcard_json.write_to_config()
+
+    return [], "", ""
+
+def get_image_list(gallery):
+    images = []
+    dir = wildcard_json.get_base_dir() / "galleries"
+    for cap, img in gallery[wildcard_json.key_image_array].items():
+        path = os.path.join(dir, img[wildcard_json.key_img])
+        images.append((Image.open(path, "r", None), cap))
+
+    # build geninfo json data
+    image_generation_info, image_generation_html = wildcard_misc.get_initial_generation_info(gallery[wildcard_json.key_image_array])
+    return images, image_generation_info, image_generation_html
+
+def click_upload_add(image, upload_generation_info):
+    params = parse_generation_parameters(upload_generation_info)
+    #print(params)
+    image_details = {}
+    image_details[wildcard_json.key_all_prompts] = [params["Prompt"] if "Prompt" in params else ""]
+    image_details[wildcard_json.key_all_negative_prompts] = [params["Negative prompt"] if "Negative prompt" in params else ""]
+    image_details[wildcard_json.key_all_seeds] = [int(params["Seed"] if "Seed" in params else "0")]
+    image_details[wildcard_json.key_seed_all_subseeds] = [int(params["Variation seed"] if "Variation seed" in params else "0")]
+    image_details[wildcard_json.key_seed_subseed_strength] = float(params["Variation seed strength"] if "Variation seed strength" in params else "0")
+    image_details[wildcard_json.key_width] = int(params["Size-1"] if "Size-1" in params else "0")
+    image_details[wildcard_json.key_height] = int(params["Size-2"] if "Size-2" in params else "0")
+    image_details[wildcard_json.key_sampler] = params["Sampler"] if "Sampler" in params else ""
+    image_details[wildcard_json.key_scheduler] = params["Schedule type"] if "Schedule type" in params else ""
+    image_details[wildcard_json.key_cfg] = params["CFG scale"] if "CFG scale" in params else ""
+    image_details[wildcard_json.key_sampling_steps] = params["Steps"] if "Steps" in params else ""
+    image_details[wildcard_json.key_batch_size] = 1
+    image_details[wildcard_json.key_restore_faces] = params["Prompt"] if "Prompt" in params else ""
+    image_details[wildcard_json.key_face_restoration_model] = params["DEFres"] if "DEFres" in params else ""
+    image_details[wildcard_json.key_sd_model_name] = params["Model"] if "Model" in params else ""
+    image_details[wildcard_json.key_sd_model_hash] = params["Model hash"] if "Model hash" in params else ""
+    image_details[wildcard_json.key_sd_vae_name] = params["sdvae"] if "sdvae" in params else ""
+    image_details[wildcard_json.key_sd_vae_hash] = params["sdvaeh"] if "sdvaeh" in params else ""
+    image_details[wildcard_json.key_seed_resize_from_w] = int(params["Seed resize from-1"] if "Seed resize from-1" in params else "0")
+    image_details[wildcard_json.key_seed_resize_from_h] = int(params["Seed resize from-2"] if "Seed resize from-2" in params else "0")
+    image_details[wildcard_json.key_denoising_strength] = params["Denoising strength"] if "Denoising strength" in params else ""
+    image_details[wildcard_json.key_extra_generation_params] = params["DEFext"] if "DEFext" in params else ""
+    image_details[wildcard_json.key_index_of_first_image] = 0
+    image_details[wildcard_json.key_infotexts] = [upload_generation_info]
+    image_details[wildcard_json.key_styles] = ""
+    image_details[wildcard_json.key_job_timestamp] = ""
+    image_details[wildcard_json.key_clip_skip] = params["Clip skip"] if "Clip skip" in params else "1"
+    image_details[wildcard_json.key_is_using_inpainting_conditioning] = params["DEFIn"] if "DEFIn" in params else ""
+    image_details[wildcard_json.key_version] = params["Version"] if "Version" in params else ""
+
+    wildcard_misc.save_image_to_gallery_intern((image, params["Prompt"]) if "Prompt" in params else image, json.dumps(image_details), 0)
+
+    # find gallery object
+    obj = wildcard_json.create_new_gallery(gallery_selected)
+    # get images
+    return get_image_list(obj)
+
+
 def change_gallery_selection(gallery_selection):
+    if isinstance(gallery_selection, list):
+        return "", "", "", "", 20, "Euler a", "SGM Uniform", -1, 896, 1152, 1, 5, 32, False, []
     global gallery_selected
     gallery_selected = gallery_selection
     # find gallery object
     obj = wildcard_json.create_new_gallery(gallery_selected)
     # get images
-    images = []
-    dir = wildcard_json.get_base_dir() / "galleries"
-    for cap, img in obj[wildcard_json.key_image_array].items():
-        path = os.path.join(dir, img)
-        images.append((Image.open(path, "r", None), cap))
-
-    # build geninfo json data
-    image_generation_info, image_generation_html = wildcard_misc.get_initial_generation_info(obj[wildcard_json.key_image_array])
+    images, image_generation_info, image_generation_html = get_image_list(obj)
 
     # return data 
-    return gallery_selection, obj[wildcard_json.key_prompt], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_count], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_distilled_cfg], images, obj[wildcard_json.key_image_generation_info], obj[wildcard_json.key_image_generation_html]
+    return gallery_selection, obj[wildcard_json.key_prompt], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_count], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_distilled_cfg], images, image_generation_info, image_generation_html
 
-def click_refresh_galleries():
+def click_refresh_galleries(gallery_selection):
     refresh_galleries_()
-    return galleries
+    return gr.Dropdown.update(choices=galleries), *change_gallery_selection(gallery_selection)
 
 def click_add_gallery(gallery_name):
     # add gallery to gallery list and update list
@@ -150,11 +216,10 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
     refresh_galleries_()
 
     scripts.scripts_current = wildcard_txt2img.scripts_gallery
-    wildcard_txt2img.scripts_gallery.initialize_scripts(is_img2img=False)
 
     with gr.Row():
         # gallery selection
-        gallery_selection = gr.Dropdown(value=galleries[0] if len(galleries) > 0 else "Empty", choices=galleries, label="Select Gallery", elem_id=f"{id_part}_gallery_dropdown")
+        gallery_selection = gr.Dropdown(value="", choices=galleries, label="Select Gallery", elem_id=f"{id_part}_gallery_dropdown")
         refresh_galleries = ToolButton(value=refresh_symbol, elem_id=f"{id_part}_gallery_refresh")
         gallery_name = gr.Textbox(elem_id=f"{id_part}_gallery_name", label="Gallery Name", show_label=True, lines=1, value='')
         add_gallery = gr.Button(value="Add new gallery", elem_id=f"{id_part}_add_gallery")
@@ -166,7 +231,25 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
         with gr.Column(scale=1, min_width=300):
             with gr.Tab("Gallery Options", id=f"{id_part}_gallery_options"):
                 # gallery options, adding removing images, etc.
-                pass
+
+                # section to remove all images
+                with gr.Row():
+                    remove_all_images = gr.Button(value="Remove all images", size='sm')
+                # section to manually add an image
+                # use png info logic for generation parameters
+                with gr.Row():
+                    with gr.Column():
+                        upload_image = gr.Image(elem_id=f"{id_part}_upload_image", label="Upload image to gallery", source="upload", interactive=True, type="pil", height="100", width="100", image_mode="RGBA")
+                        upload_add = gr.Button(value="Add to gallery", size='sm', elem_id=f"{id_part}_add_upload")
+                    with gr.Column():
+                        html = gr.HTML()
+                        upload_generation_info = gr.Textbox(visible=False, elem_id=f"{id_part}upload_generation_info")
+                        html2 = gr.HTML()
+                    upload_image.change(
+                        fn=wrap_gradio_call_no_job(modules.extras.run_pnginfo),
+                        inputs=[upload_image],
+                        outputs=[html, upload_generation_info, html2]
+                    )
             with gr.Tab("Gallery Generation", id=f"{id_part}_gallery_generation"):
                 # for generating new gallery elements directly from the tab
                 toprow = ui_toprow.Toprow(is_img2img=False, is_compact=shared.opts.compact_prompt_box, id_part=id_part)
@@ -313,6 +396,16 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
                 extra_tabs.__exit__()
             
 
+    remove_all_images.click(
+        fn=click_remove_all_images,
+        inputs=[],
+        outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
+    )
+    upload_add.click(
+        fn=click_upload_add,
+        inputs=[upload_image, upload_generation_info],
+        outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
+    )
 
     steps = wildcard_txt2img.scripts_gallery.script('Sampler').steps
     sampler_name = wildcard_txt2img.scripts_gallery.script('Sampler').sampler_name
@@ -330,8 +423,8 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
     gallery_selection.change(**gallery_change_args)
     refresh_galleries.click(
         fn=click_refresh_galleries,
-        inputs=[],
-        outputs=[gallery_selection]
+        inputs=[gallery_selection],
+        outputs=[gallery_selection, gallery_name, toprow.prompt, toprow.negative_prompt, steps, sampler_name, scheduler, seed, width, height, batch_count, batch_size, cfg_scale, distilled_cfg_scale, output_panel.gallery, output_panel.generation_info, output_panel.infotext]
     )
     add_gallery.click(
         fn=click_add_gallery,
@@ -393,7 +486,7 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
     seed.change(
         fn=change_seed,
         inputs=[seed],
-    )
+    )    
 
     txt2img_inputs = [
         dummy_component,

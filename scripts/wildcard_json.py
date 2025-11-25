@@ -342,15 +342,21 @@ def update_wildcard_keys(oldversion, newversion):
             if key_image_generation_info in obj:
                 if key_image_array in obj:
                     image_array = {}
+                    count = 0
                     for cap, img in obj[key_image_array].items():
                         imageinfo = json.loads(obj[key_image_generation_info])
                         del imageinfo[key_all_negative_prompts]
                         del imageinfo[key_all_prompts]
                         del imageinfo[key_all_seeds]
                         del imageinfo[key_seed_all_subseeds]
-                        imageinfo[key_infotexts] = imageinfo[key_infotexts][0]
+                        # if there are enough infotexts for all images in array, pick the correct one
+                        if len(imageinfo[key_infotexts]) == len(obj[key_image_array]):
+                            imageinfo[key_infotexts] = imageinfo[key_infotexts][count]
+                        else:
+                            imageinfo[key_infotexts] = imageinfo[key_infotexts][0]
                         imageinfo[key_img] = img
                         image_array[cap] = imageinfo
+                        count += 1
                     obj[key_image_array] = image_array
                 del obj[key_image_generation_info]
                 del obj[key_image_generation_html]
@@ -383,6 +389,8 @@ gallery_version = 1
 def create_new_gallery(gallery:str):
     update_gallery = False
     obj = {}
+    if isinstance(json_data[key_galleries], list):
+        print("galleries is list???")
     if gallery in json_data[key_galleries]:
         print ("[WG] Found gallery in database " + gallery)
         obj = json_data[key_galleries][gallery]
@@ -416,7 +424,7 @@ def get_gallery(gallery:str):
     if (gallery in json_data[key_galleries]):
         return json_data[key_galleries][gallery]
     else:
-        return create_new_gallery(gallery)
+        return {}
 
 def update_gallery(gallery:str, key:str, value):
     if gallery in json_data[key_galleries]:
@@ -459,8 +467,11 @@ def writeback_gallery_changes():
     write_to_config()
 
 def get_galleries() -> list[str]:
+    galleries = []
     if key_galleries in json_data:
-        return json_data[key_galleries].keys()
+        for key in json_data[key_galleries].keys():
+            galleries.append(key)
+        return galleries
     else:
         json_data[key_galleries] = {}
-        return json_data[key_galleries].keys()
+        return galleries

@@ -22,6 +22,10 @@ import collections.abc
 
 import random
 
+from pathlib import Path
+
+from PIL import Image
+
 from scripts.wildcard_data import get_gen_data, get_wildcard_manager, key_wildcard, key_prompt, key_prompt_second
 
 def delete_old_images(imagelist):
@@ -32,9 +36,8 @@ def delete_old_images(imagelist):
         for cap, obj in imagelist.items():
             #1234path = os.path.join(dir, obj[wildcard_json.key_ia_filename])
             path = os.path.join(dir, obj[wildcard_json.key_img])
-            print(path)
             if (os.path.exists(path)):
-                print("exists")
+                pass
             try:
                 os.remove(path)
                 os.removedirs(os.path.dirname(path))
@@ -43,9 +46,8 @@ def delete_old_images(imagelist):
     elif isinstance(imagelist, collections.abc.Iterable):
         for img in imagelist:
             path = os.path.join(dir, img[wildcard_json.key_img])
-            print(path)
             if (os.path.exists(path)):
-                print("exists")
+                pass
             try:
                 os.remove(path)
                 os.removedirs(os.path.dirname(path))
@@ -53,6 +55,17 @@ def delete_old_images(imagelist):
                 pass
     else:
         print("[ERROR] [WG] imagelist for deletion not of known type")
+
+ImageExtensions= ['.jpeg','.jpg','.jpe','.jif','.jfif','.jfi'
+                  '.gif',
+                  '.png',
+                  '.webp',
+                  '.heif','.heic',
+                  '.tiff','.tif',
+                  '.bmp','.dib',
+                  '.psd',
+                  '.raw','.arw','.cr2','.nrw'
+                  '.eps']
 
 def delete_gallery(path):
     for root,dirs, files in os.walk(path, topdown=False):
@@ -65,13 +78,23 @@ def delete_gallery(path):
             try:
                 os.removedirs(os.path.join(root, dir))
             except Exception as e:
-                print(e)
+                pass
     try:
         os.removedirs(path)
     except Exception as e:
-        print(e)
+        pass
         
-
+def get_images_from_folder(path) -> list[Image.Image]:
+    images = []
+    for root,dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            try:
+                if Path(os.path.join(root, name)).suffix in ImageExtensions:
+                    images.append(Image.open(os.path.join(root, name), "r", None))
+            except Exception as e:
+                pass
+    return images
+    
 
 def save_images(p, processed, generation_info_js, gen_html, mode):
     # get image num and pathes
@@ -152,18 +175,23 @@ def save_images(p, processed, generation_info_js, gen_html, mode):
 
 def save_image_to_gallery(image, generation_info_s, img_index):
     generation_info = json.loads(generation_info_s)
-    if img_index < 0 or img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" in generation_info:
+    if img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" in generation_info:
         return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
-    return save_image_to_gallery_intern(image[img_index], generation_info_s, img_index)
-def save_image_to_gallery_intern(img, generation_info, img_index):
-    generation_info = json.loads(generation_info)
+    elif img_index < 0:
+        # save all images to the gallery
+        for i in range(len(generation_info[wildcard_json.key_infotexts])):
+            save_image_to_gallery_intern(image[i], generation_info, i)
+    else:
+        # save only the selected image to the gallery
+        return save_image_to_gallery_intern(image[img_index], generation_info, img_index)
+def save_image_to_gallery_intern(img, generation_info, img_index,dont_save_database=False):
     dir = wildcard_json.get_base_dir() / "galleries"
     gallery_name = prompt_gallery.get_gallery_name()
+    print("Save image to gallery " + gallery_name)
     if (gallery_name == ""):
         return
     image_path = os.path.join(dir, gallery_name)
     gallery = wildcard_json.get_gallery(gallery_name)
-
     to_delete = []
 
     fullfn, txt_fullfn = images.save_image(img[0] if isinstance(img, tuple) else img, image_path, "", generation_info[wildcard_json.key_all_seeds][img_index], generation_info[wildcard_json.key_all_prompts][img_index], opts.samples_format, info=generation_info[wildcard_json.key_infotexts][img_index])
@@ -217,7 +245,8 @@ def save_image_to_gallery_intern(img, generation_info, img_index):
 
     delete_old_images(to_delete)
 
-    wildcard_json.write_to_config()
+    if dont_save_database == False:
+        wildcard_json.write_to_config()
     
 def remove_image_from_gallery(image, generation_info, html_info, img_index):
     generation_info = json.loads(generation_info)
@@ -278,7 +307,7 @@ def update_generation_info(generation_info, html_info, img_index):
         generation_info = json.loads(generation_info)
         if img_index < 0 or img_index >= len(generation_info["infotexts"]):
             return html_info, gr.update()
-        return plaintext_to_html(generation_info["infotexts"][img_index]), gr.update()
+        return plaintext_to_html(generation_info["infotexts"][img_index]), gr.update(), generation_info["infotexts"][img_index]
     except Exception:
         pass
     # if the json parse or anything else fails, just return the old html_info
@@ -300,7 +329,7 @@ def create_wg_output_panel(tabname, outdir):
 
         util.open_folder(f)
     with gr.Group(elem_id=f"{tabname}_gallery_container"):
-        output_panel.gallery = gr.Gallery(label='Output', show_label=False, elem_id=f"{tabname}_gallery", columns=4, preview=False, height="max-content", interactive=False, type="pil", object_fit="contain")
+        output_panel.gallery = gr.Gallery(label='Output', show_label=False, elem_id=f"{tabname}_gallery", columns=6, preview=False, interactive=False, type="pil", object_fit="contain")#"max-content"#, height='100vh'
     with gr.Row(elem_id=f"image_buttons_wg", elem_classes="image-buttons"):
         open_folder_button = ToolButton(folder_symbol, elem_id=f'{tabname}_open_folder', visible=not shared.cmd_opts.hide_ui_dir_config, tooltip="Open images output directory.")
 
@@ -318,7 +347,9 @@ def create_wg_output_panel(tabname, outdir):
             add_to_gallery = gr.Button("Add to gallery", elem_id=f"{tabname}_add_to_gallery", tooltip="Add the image to the gallery")
             remove_from_gallery = gr.Button("Remove from Gallery", elem_id=f"{tabname}_remove_from_gallery", tooltip="Remove image from image gallery")
             
+    output_panel.gallery.change(
 
+    )
         
     open_folder_button.click(
         fn=lambda images, index: open_folder(shared.opts.outdir_samples or outdir, images, index),
@@ -336,12 +367,13 @@ def create_wg_output_panel(tabname, outdir):
         output_panel.html_log = gr.HTML(elem_id=f'html_log_{tabname}', elem_classes="html-log")
 
         output_panel.generation_info = gr.Textbox(visible=False, elem_id=f'generation_info_{tabname}')
+        output_panel.generation_infotext = gr.Textbox(visible=False, elem_id=f'generation_infotext_{tabname}')
         generation_info_button = gr.Button(visible=False, elem_id=f"{tabname}_generation_info_button")
         generation_info_button.click(
             fn=update_generation_info,
             _js="function(x, y, z){ return [x, y, selected_gallery_index()] }",
             inputs=[output_panel.generation_info, output_panel.infotext, output_panel.infotext],
-            outputs=[output_panel.infotext, output_panel.infotext],
+            outputs=[output_panel.infotext, output_panel.infotext, output_panel.generation_infotext],
             show_progress=False,
         )
 
@@ -395,12 +427,12 @@ def create_wg_output_panel(tabname, outdir):
     paste_field_names_img = modules.scripts.scripts_img2img.paste_field_names
 
     parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
-            paste_button=send_to_txt2img, tabname='txt2img', source_image_component=output_panel.gallery,source_text_component=output_panel.generation_info
+            paste_button=send_to_txt2img, tabname='txt2img', source_image_component=output_panel.gallery,source_text_component=output_panel.generation_infotext
         ))
 
     for paste_tabname, paste_button in buttons.items():
         parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
-            paste_button=paste_button, tabname=paste_tabname, source_image_component=output_panel.gallery,source_text_component=output_panel.generation_info,
+            paste_button=paste_button, tabname=paste_tabname, source_image_component=output_panel.gallery,source_text_component=output_panel.generation_infotext,
             paste_field_names=paste_field_names_img
         ))
 

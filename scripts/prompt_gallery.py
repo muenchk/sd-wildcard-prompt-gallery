@@ -31,6 +31,7 @@ import scripts.wildcard_txt2img as wildcard_txt2img
 import scripts.wildcard_data as wildcard_data
 import scripts.wildcard_toprow as wildcard_toprow
 import scripts.wildcard_misc as wildcard_misc
+import scripts.wg_files as wg_files
 
 from modules.ui import ordered_ui_categories, calc_resolution_hires, update_token_counter, update_negative_prompt_token_counter, create_output_panel, switch_values_symbol
 from modules_forge.forge_canvas.canvas import ForgeCanvas, canvas_head
@@ -107,9 +108,10 @@ def get_image_list(gallery):
     image_generation_info, image_generation_html = wildcard_misc.get_initial_generation_info(gallery[wildcard_json.key_image_array])
     return images, image_generation_info, image_generation_html
 
-def click_upload_add(image, upload_generation_info):
+def add_image_to_gallery(image, upload_generation_info, dont_save_database=False):
+    
     params = parse_generation_parameters(upload_generation_info)
-    #print(params)
+
     image_details = {}
     image_details[wildcard_json.key_all_prompts] = [params["Prompt"] if "Prompt" in params else ""]
     image_details[wildcard_json.key_all_negative_prompts] = [params["Negative prompt"] if "Negative prompt" in params else ""]
@@ -141,13 +143,41 @@ def click_upload_add(image, upload_generation_info):
     image_details[wildcard_json.key_is_using_inpainting_conditioning] = params["DEFIn"] if "DEFIn" in params else ""
     image_details[wildcard_json.key_version] = params["Version"] if "Version" in params else ""
 
-    wildcard_misc.save_image_to_gallery_intern((image, params["Prompt"]) if "Prompt" in params else image, json.dumps(image_details), 0)
+    wildcard_misc.save_image_to_gallery_intern((image, params["Prompt"]) if "Prompt" in params else image, image_details, 0, dont_save_database=dont_save_database)
 
+def click_upload_add(image, upload_generation_info):
+    add_image_to_gallery(image, upload_generation_info)
     # find gallery object
     obj = wildcard_json.create_new_gallery(gallery_selected)
     # get images
     return get_image_list(obj)
 
+def click_add_from_folder():
+    folder = wg_files.get_folder_path("")
+    print(folder)
+    imgs = wildcard_misc.get_images_from_folder(folder)
+    for img in imgs:
+        html1, geninfo, html2 = wg_files.run_pnginfo(img)
+        add_image_to_gallery(img, geninfo, dont_save_database=True)
+    
+    if len(imgs) > 0:
+        wildcard_json.write_to_config()
+    # find gallery object
+    obj = wildcard_json.create_new_gallery(gallery_selected)
+    # get images
+
+    return get_image_list(obj)
+def click_add_from_file():
+    file = wg_files.get_any_file_path("")
+    print(file)
+    # get the image
+    img = Image.open(file, "r", None)
+    html1, geninfo, html2 = wg_files.run_pnginfo(img)
+
+    return click_upload_add(img, geninfo)
+
+from cProfile import Profile
+from pstats import SortKey, Stats
 
 def change_gallery_selection(gallery_selection):
     if isinstance(gallery_selection, list):
@@ -158,7 +188,6 @@ def change_gallery_selection(gallery_selection):
     obj = wildcard_json.create_new_gallery(gallery_selected)
     # get images
     images, image_generation_info, image_generation_html = get_image_list(obj)
-
     # return data 
     return gallery_selection, obj[wildcard_json.key_prompt], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_count], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_distilled_cfg], images, image_generation_info, image_generation_html
 
@@ -231,10 +260,13 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
         with gr.Column(scale=1, min_width=300):
             with gr.Tab("Gallery Options", id=f"{id_part}_gallery_options"):
                 # gallery options, adding removing images, etc.
-
+                
                 # section to remove all images
                 with gr.Row():
                     remove_all_images = gr.Button(value="Remove all images", size='sm')
+                with gr.Row():
+                    add_from_folder = gr.Button(value="Add images from folder", size='sm')
+                    add_from_file = gr.Button(value="Add image", size='sm')
                 # section to manually add an image
                 # use png info logic for generation parameters
                 with gr.Row():
@@ -401,6 +433,16 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
         inputs=[],
         outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
     )
+    add_from_folder.click(
+        fn=click_add_from_folder,
+        inputs=[],
+        outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
+    )
+    add_from_file.click(
+        fn=click_add_from_file,
+        inputs=[],
+        outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
+    )
     upload_add.click(
         fn=click_upload_add,
         inputs=[upload_image, upload_generation_info],
@@ -563,6 +605,41 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
         ],
         show_progress=False,
     )
+
+
+    prompt_pase_fields = [
+        PasteField(toprow.prompt, "Prompt", api="prompt"),
+        PasteField(toprow.negative_prompt, "Negative prompt", api="negative_prompt"),
+        PasteField(cfg_scale, "CFG scale", api="cfg_scale"),
+        PasteField(distilled_cfg_scale, "Distilled CFG Scale", api="distilled_cfg_scale"),
+        PasteField(width, "Size-1", api="width"),
+        PasteField(height, "Size-2", api="height"),
+        PasteField(batch_size, "Batch size", api="batch_size"),
+        PasteField(toprow.ui_styles.dropdown, lambda d: d["Styles array"] if isinstance(d.get("Styles array"), list) else gr.update(), api="styles"),
+        PasteField(denoising_strength, "Denoising strength", api="denoising_strength"),
+        PasteField(enable_hr, lambda d: "Denoising strength" in d and ("Hires upscale" in d or "Hires upscaler" in d or "Hires resize-1" in d), api="enable_hr"),
+        PasteField(hr_scale, "Hires upscale", api="hr_scale"),
+        PasteField(hr_upscaler, "Hires upscaler", api="hr_upscaler"),
+        PasteField(hr_second_pass_steps, "Hires steps", api="hr_second_pass_steps"),
+        PasteField(hr_resize_x, "Hires resize-1", api="hr_resize_x"),
+        PasteField(hr_resize_y, "Hires resize-2", api="hr_resize_y"),
+        PasteField(hr_checkpoint_name, "Hires checkpoint", api="hr_checkpoint_name"),
+        PasteField(hr_additional_modules, "Hires VAE/TE", api="hr_additional_modules"),
+        PasteField(hr_sampler_name, sd_samplers.get_hr_sampler_from_infotext, api="hr_sampler_name"),
+        PasteField(hr_scheduler, sd_samplers.get_hr_scheduler_from_infotext, api="hr_scheduler"),
+        PasteField(hr_sampler_container, lambda d: gr.update(visible=True) if d.get("Hires sampler", "Use same sampler") != "Use same sampler" or d.get("Hires checkpoint", "Use same checkpoint") != "Use same checkpoint" or d.get("Hires schedule type", "Use same scheduler") != "Use same scheduler" else gr.update()),
+        PasteField(hr_prompt, "Hires prompt", api="hr_prompt"),
+        PasteField(hr_negative_prompt, "Hires negative prompt", api="hr_negative_prompt"),
+        PasteField(hr_cfg, "Hires CFG Scale", api="hr_cfg"),
+        PasteField(hr_distilled_cfg, "Hires Distilled CFG Scale", api="hr_distilled_cfg"),
+        PasteField(hr_prompts_container, lambda d: gr.update(visible=True) if d.get("Hires prompt", "") != "" or d.get("Hires negative prompt", "") != "" else gr.update()),
+        *scripts.scripts_txt2img.infotext_fields
+    ]
+    parameters_copypaste.add_paste_fields("prompt_gallery", None, prompt_pase_fields, override_settings)
+    parameters_copypaste.register_paste_params_button(parameters_copypaste.ParamBinding(
+        paste_button=toprow.paste, tabname="prompt_gallery", source_text_component=toprow.prompt, source_image_component=None,
+    ))
+
 
     toprow.ui_styles.dropdown.change(fn=wrap_queued_call(update_token_counter), inputs=[toprow.prompt, steps, toprow.ui_styles.dropdown], outputs=[toprow.token_counter])
     toprow.ui_styles.dropdown.change(fn=wrap_queued_call(update_negative_prompt_token_counter), inputs=[toprow.negative_prompt, steps, toprow.ui_styles.dropdown], outputs=[toprow.negative_token_counter])

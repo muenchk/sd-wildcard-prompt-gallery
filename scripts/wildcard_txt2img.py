@@ -436,7 +436,7 @@ def txt2img_function(id_task: str, request: gr.Request, mode:int, *args):
 
     print("step 1")
 
-    p = txt2img_create_processing(id_task, scripts_custom, request, *args)
+    p = txt2img_create_processing(id_task, request, scripts_custom, *args)
 
     p.steps = get_gen_data(wildcard_json.key_sampling_steps)
     p.sampler_name = get_gen_data(wildcard_json.key_sampler)

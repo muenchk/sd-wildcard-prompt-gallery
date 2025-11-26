@@ -173,7 +173,7 @@ def save_images(p, processed, generation_info_js, gen_html, mode):
     wildcard_json.write_to_config()
 
 
-def save_image_to_gallery(image, generation_info_s, img_index):
+def save_image_to_gallery(image:list[Image.Image]|list[tuple[Image.Image, str]], generation_info_s:str, img_index:int):
     generation_info = json.loads(generation_info_s)
     if img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" in generation_info:
         return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
@@ -184,7 +184,7 @@ def save_image_to_gallery(image, generation_info_s, img_index):
     else:
         # save only the selected image to the gallery
         return save_image_to_gallery_intern(image[img_index], generation_info, img_index)
-def save_image_to_gallery_intern(img, generation_info, img_index,dont_save_database=False):
+def save_image_to_gallery_intern(img:list[Image.Image]|list[tuple[Image.Image, str]]|Image.Image, generation_info:object, img_index:int, dont_save_database:bool=False) -> str:
     dir = wildcard_json.get_base_dir() / "galleries"
     gallery_name = prompt_gallery.get_gallery_name()
     print("Save image to gallery " + gallery_name)
@@ -247,29 +247,52 @@ def save_image_to_gallery_intern(img, generation_info, img_index,dont_save_datab
 
     if dont_save_database == False:
         wildcard_json.write_to_config()
-    
-def remove_image_from_gallery(image, generation_info, html_info, img_index):
+
+    return caption
+
+def replace_image_in_gallery_inplace(images:list[Image.Image]|list[tuple[Image.Image, str]], generation_info:str, img_index:int, new_image:Image.Image, new_generation_info:object):
     generation_info = json.loads(generation_info)
+    if remove_image_from_gallery(images, generation_info, img_index) == False:
+        return images
+    caption = save_image_to_gallery_intern(new_image, new_generation_info, 0)
+    images[img_index] = (new_image, caption)
+
+    return images, caption
+
+def remove_image_from_gallery(images:list[Image.Image]|list[tuple[Image.Image, str]], generation_info:object, img_index:int) -> bool:
     if img_index < 0 or img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" not in generation_info:
-        return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
+        return False
     dir = wildcard_json.get_base_dir() / "galleries"
     gallery_name = prompt_gallery.get_gallery_name()
     if (gallery_name == ""):
-        return
+        return False
     image_path = os.path.join(dir, gallery_name)
     gallery = wildcard_json.get_gallery(gallery_name)
 
-    to_delete = [gallery[wildcard_json.key_image_array][image[img_index][1]]]
+    to_delete = [gallery[wildcard_json.key_image_array][images[img_index][1]]]
 
     delete_old_images(to_delete)
-    del gallery[wildcard_json.key_image_array][image[img_index][1]]
+    del gallery[wildcard_json.key_image_array][images[img_index][1]]
+    return True
+    
+    
+def click_remove_image_from_gallery(image:list[Image.Image]|list[tuple[Image.Image, str]], generation_info:str, html_info:str, img_index:int):
+    generation_info = json.loads(generation_info)
+    if img_index < 0 or img_index >= len(generation_info[wildcard_json.key_infotexts]) or "loaded" not in generation_info:
+        return # if loaded in generation_info, we loaded the images from the databse, i.e. the image is already in the gallery
+    # remove image from gallery (does not return new image list so erase image ourselves)
+    if (remove_image_from_gallery(image, generation_info, img_index) == False):
+        # image couldn't be removed
+        return gr.update(), gr.update(), gr.update()
 
     del image[img_index]
+    
+    gallery_name = prompt_gallery.get_gallery_name()
+    gallery = wildcard_json.get_gallery(gallery_name)
     image_generation_info, image_generation_html = get_initial_generation_info(gallery[wildcard_json.key_image_array])
 
     return image, image_generation_info, image_generation_html
     
-
 def get_initial_generation_info(imagelist):
     retobj = {}
     retobj[wildcard_json.key_all_prompts] = []
@@ -301,8 +324,55 @@ def get_initial_generation_info(imagelist):
     
     return json.dumps(retobj, default=lambda o: None), plaintext_to_html(retobj[wildcard_json.key_infotexts][0] if len(imagelist) > 0 else "")
         
+def recalc_generation_info_add(caption:str|list[str], imagelist:dict, generation_info:str):
+    generation_info = json.loads(generation_info)
+    if caption is str:
+        caption = [caption]
+    for cap in caption:
+        if cap in imagelist:
+            obj = imagelist[cap]
+            for key, val in obj.items():
+                if key == wildcard_json.key_prompt:
+                    generation_info[wildcard_json.key_all_prompts].append(val)
+                    generation_info[key] = val
+                if key == wildcard_json.key_negative_prompt:
+                    generation_info[wildcard_json.key_all_negative_prompts].append(val)
+                    generation_info[key] = val
+                if key == wildcard_json.key_seed:
+                    generation_info[wildcard_json.key_all_seeds].append(val)
+                    generation_info[key] = val
+                if key == wildcard_json.key_seed_subseed:
+                    generation_info[wildcard_json.key_seed_all_subseeds].append(val)
+                    generation_info[key] = val
+                if key == wildcard_json.key_infotexts:
+                    generation_info[wildcard_json.key_infotexts].append(val)
+    return json.dumps(generation_info, default=lambda o: None), plaintext_to_html(generation_info[wildcard_json.key_infotexts][0] if len(imagelist) > 0 else "")
 
-def update_generation_info(generation_info, html_info, img_index):
+
+def recalc_generation_info_replace(img_index:int, caption:str, imagelist:dict, generation_info:str):
+    generation_info = json.loads(generation_info)
+    if caption in imagelist:
+        obj = imagelist[caption]
+        for key, val in obj.items():
+            if key == wildcard_json.key_prompt:
+                generation_info[wildcard_json.key_all_prompts][img_index] = val
+                generation_info[key] = val
+            if key == wildcard_json.key_negative_prompt:
+                generation_info[wildcard_json.key_all_negative_prompts][img_index] = val
+                generation_info[key] = val
+            if key == wildcard_json.key_seed:
+                generation_info[wildcard_json.key_all_seeds][img_index] = val
+                generation_info[key] = val
+            if key == wildcard_json.key_seed_subseed:
+                generation_info[wildcard_json.key_seed_all_subseeds][img_index] = val
+                generation_info[key] = val
+            if key == wildcard_json.key_infotexts:
+                generation_info[wildcard_json.key_infotexts][img_index] = val
+    
+    return json.dumps(generation_info, default=lambda o: None), plaintext_to_html(generation_info[wildcard_json.key_infotexts][0] if len(imagelist) > 0 else "")
+
+
+def update_generation_info(generation_info:str, html_info:str, img_index:int):
     try:
         generation_info = json.loads(generation_info)
         if img_index < 0 or img_index >= len(generation_info["infotexts"]):
@@ -313,7 +383,7 @@ def update_generation_info(generation_info, html_info, img_index):
     # if the json parse or anything else fails, just return the old html_info
     return html_info, gr.update()
 
-def create_wg_output_panel(tabname, outdir):
+def create_wg_output_panel(tabname:str, outdir):
     output_panel = OutputPanel()
     def open_folder(f, images=None, index=None):
         if shared.cmd_opts.hide_ui_dir_config:
@@ -416,7 +486,7 @@ def create_wg_output_panel(tabname, outdir):
                 show_progress=False
             )
             remove_from_gallery.click(
-                fn=remove_image_from_gallery,
+                fn=click_remove_image_from_gallery,
                 _js="function(w, x, y, z){ return [w, x, y, selected_gallery_index()] }",
                 inputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext, output_panel.infotext],
                 outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext],

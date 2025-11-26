@@ -37,29 +37,15 @@ import scripts.prompt_gallery as prompt_gallery
 import scripts.wildcard_misc as wildcard_misc
 
 import os
+import sys
 
 from dynamicprompts.wildcards import WildcardManager
 from dynamicprompts.wildcards.collection import WildcardTextFile
 from dynamicprompts.wildcards.tree import WildcardTreeNode
 
-from modules_forge import main_entry, forge_space
-from modules_forge.forge_canvas.canvas import ForgeCanvas, canvas_head
 
 from modules.ui_common import OutputPanel, save_files, update_generation_info
 folder_symbol = '\U0001f4c2'  # 📂
-
-try:
-    from scripts.wib import wib_db
-except ModuleNotFoundError:
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts")))
-    from wib import wib_db
-
-try:
-    import cv2
-    opencv_installed = True
-except ImportError:
-    print("Image Browser: opencv is not installed. Video related actions cannot be performed.")
-    opencv_installed = False
 
 try:
     from modules import generation_parameters_copypaste as sendto
@@ -68,6 +54,8 @@ except ImportError:
 
 try:
     from modules_forge import forge_version
+    from modules_forge import main_entry, forge_space
+    from modules_forge.forge_canvas.canvas import canvas_head
     forge = True
 except ImportError:
     forge = False
@@ -168,48 +156,11 @@ def traverse_all_files(curr_path, image_list, tab_base_tag_box, img_path_depth) 
                 current_depth = current_depth - 1
     return image_list
 
-def get_all_images(dir_name, img_path_depth):
-    global current_depth
-    print("get_all_images")
-    current_depth = 0
-    fileinfos = []
-    
-    fileinfos = traverse_all_files(dir_name, [], "image_browser_tab_others", img_path_depth)
-    
-    if opts.image_browser_scan_exif:
-        with wib_db.transaction() as cursor:
-            wib_db.fill_work_files(cursor, fileinfos)
-    
-    sort_values = {}
-    exif_info = dict(exif_cache)
-    if exif_info:
-        sort_float = False
-
-        if sort_float:
-            fileinfos = [x for x in fileinfos if sort_values[x[0]] != "0"]
-            fileinfos.sort(key=lambda x: float(sort_values[x[0]]))
-            fileinfos = dict(fileinfos)
-        else:
-            fileinfos = dict(sorted(fileinfos, key=lambda x: natural_keys(sort_values[x[0]])))
-        filenames = [finfo[0] for finfo in fileinfos]
-    else:
-        filenames = [finfo[0] for finfo in fileinfos]
-    return filenames
-
-
 def hash_image_path(image_path):
     image_path_hash = hashlib.md5(image_path.encode("utf-8")).hexdigest()
     cache_image_path = os.path.join(optimized_cache, image_path_hash + ".jpg")
     cache_video_path = os.path.join(optimized_cache, image_path_hash + "_video.jpg")
     return cache_image_path, cache_video_path 
-
-def extract_video_frame(video_path, time, image_path):
-    vidcap = cv2.VideoCapture(video_path)
-    vidcap.set(cv2.CAP_PROP_POS_MSEC, time * 1000)  # time in seconds
-    success, image = vidcap.read()
-    if success:
-        cv2.imwrite(image_path, image)
-    return success
 
 def get_thumbnail(image_video, image_list):
     global optimized_cache
@@ -263,36 +214,6 @@ def get_thumbnail(image_video, image_list):
         else:
             thumbnail_list.append(image_path)
     return thumbnail_list
-
-def get_image_page(img_path):
-
-    img_path, _ = pure_path(img_path)
-    filenames = get_all_images(img_path, 1)
-    length = len(filenames)
-    image_list = filenames
-
-    image_browser_img_info = "[]"
-
-    if opts.image_browser_use_thumbnail:
-        thumbnail_list = get_thumbnail("image", image_list)
-    else:
-        thumbnail_list = image_list
-    thumbnail_list = get_thumbnail("video", thumbnail_list)
-    
-    load_info = "<div style='color:#999; font-size:10px' align='center'>"
-    load_info += f"{length} images in this directory {int(length+1)}"
-    load_info += "</div>"
-    return filenames,thumbnail_list,  None,json.dumps(image_list),image_browser_img_info
-
-
-def read_path_recorder():
-    path_recorder = wib_db.load_path_recorder()
-    path_recorder_formatted = [value.get("path_display") for key, value in path_recorder.items()]
-    path_recorder_formatted = sorted(path_recorder_formatted, key=lambda x: natural_keys(x.lower()))
-    path_recorder_unformatted = list(path_recorder.keys())
-    path_recorder_unformatted = sorted(path_recorder_unformatted, key=lambda x: natural_keys(x.lower()))
-
-    return path_recorder, path_recorder_formatted, path_recorder_unformatted
 
 def create_override_settings_dropdown(tabname, row):
     dropdown = gr.Dropdown([], label="Override settings", visible=False, elem_id=f"{tabname}_override_settings", multiselect=True)
@@ -447,7 +368,7 @@ def on_ui_tabs():
     wildcard_txt2img.scripts_custom.initialize_scripts(is_img2img=False)
     wildcard_txt2img.scripts_gallery.initialize_scripts(is_img2img=False)
 
-    with gr.Blocks(analytics_enabled=False, head=canvas_head) as wildcard_gallery:
+    with gr.Blocks(analytics_enabled=False) as wildcard_gallery:#, head=canvas_head
         with gr.Tab(label="Wildcard Gallery", id="wg_gallery_tab") as wg_gallery_tab:
             with gr.Row():
                 with gr.Column(scale=3, min_width=300):
@@ -526,26 +447,27 @@ def on_ui_tabs():
                                             with FormRow(elem_id="wg_hires_fix_row3", variant="compact", visible=shared.opts.hires_fix_show_sampler) as hr_checkpoint_container:
                                                 hr_checkpoint_name = gr.Dropdown(label='Hires Checkpoint', elem_id="hr_checkpoint", choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True), value="Use same checkpoint", scale=2)
 
-                                                hr_checkpoint_refresh = ToolButton(value=refresh_symbol)
+                                                if forge == True:
+                                                    hr_checkpoint_refresh = ToolButton(value=refresh_symbol)
 
-                                                def get_additional_modules():
-                                                    modules_list = ['Use same choices']
-                                                    if main_entry.module_list == {}:
-                                                        _, modules = main_entry.refresh_models()
-                                                        modules_list += list(modules)
-                                                    else:
-                                                        modules_list += list(main_entry.module_list.keys())
-                                                    return modules_list
+                                                    def get_additional_modules():
+                                                        modules_list = ['Use same choices']
+                                                        if main_entry.module_list == {}:
+                                                            _, modules = main_entry.refresh_models()
+                                                            modules_list += list(modules)
+                                                        else:
+                                                            modules_list += list(main_entry.module_list.keys())
+                                                        return modules_list
 
-                                                modules_list = get_additional_modules()
-
-                                                def refresh_model_and_modules():
                                                     modules_list = get_additional_modules()
-                                                    return gr.update(choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True)), gr.update(choices=modules_list)
 
-                                                hr_additional_modules = gr.Dropdown(label='Hires VAE / Text Encoder', elem_id="hr_vae_te", choices=modules_list, value=["Use same choices"], multiselect=True, scale=3)
+                                                    def refresh_model_and_modules():
+                                                        modules_list = get_additional_modules()
+                                                        return gr.update(choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True)), gr.update(choices=modules_list)
 
-                                                hr_checkpoint_refresh.click(fn=refresh_model_and_modules, outputs=[hr_checkpoint_name, hr_additional_modules], show_progress=False)
+                                                    hr_additional_modules = gr.Dropdown(label='Hires VAE / Text Encoder', elem_id="hr_vae_te", choices=modules_list, value=["Use same choices"], multiselect=True, scale=3)
+
+                                                    hr_checkpoint_refresh.click(fn=refresh_model_and_modules, outputs=[hr_checkpoint_name, hr_additional_modules], show_progress=False)
 
                                             with FormRow(elem_id="wg_hires_fix_row3b", variant="compact", visible=shared.opts.hires_fix_show_sampler) as hr_sampler_container:
                                                 hr_sampler_name = gr.Dropdown(label='Hires sampling method', elem_id="hr_sampler", choices=["Use same sampler"] + sd_samplers.visible_sampler_names(), value="Use same sampler")

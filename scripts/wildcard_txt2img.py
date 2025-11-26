@@ -4,7 +4,6 @@ from contextlib import closing
 from gradio.components import Checkbox
 from gradio.routes import BackgroundTask
 import modules.scripts
-from modules_forge import main_thread
 from modules.ui import plaintext_to_html
 import modules.shared as shared
 from modules.shared import opts
@@ -17,6 +16,12 @@ import math
 from itertools import cycle, islice, product
 import os
 import collections.abc
+
+try:
+    from modules_forge import main_thread
+    forge = True
+except ImportError:
+    forge = False
 
 from PIL import Image, ImageFont, ImageDraw, ImageOps
 
@@ -489,18 +494,27 @@ def txt2img_function(id_task: str, request: gr.Request, mode:int, *args):
 def txt2img(id_task: str, request: gr.Request, *args):
     print("generate")
     wildcard_json.writeback_wildcard_changes()
-    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 1, *args)
+    if forge == True:
+        return main_thread.run_and_wait_result(txt2img_function, id_task, request, 1, *args)
+    else:
+        return txt2img_function(id_task, request, 1, *args)
 
 def txt2img_samples(id_task: str, request: gr.Request, *args):
     print("samples")
     wildcard_json.writeback_wildcard_changes()
-    return main_thread.run_and_wait_result(txt2img_function, id_task, request, 2, *args)
+    if forge == True:
+        return main_thread.run_and_wait_result(txt2img_function, id_task, request, 2, *args)
+    else:
+        return txt2img_function(id_task, request, 2, *args)
 
 def txt2img_samples_save(id_task:str, request: gr.Request, *args):
     print("samples save")
     wildcard_json.writeback_wildcard_changes()
     #return main_thread.run_and_wait_result(txt2img_function, id_task, request, 3, *args)
-    return txt2img_function(id_task, request, 3, *args)
+    if forge == True:
+        return txt2img_function(id_task, request, 3, *args)
+    else:
+        return txt2img_function(id_task, request, 3, *args)
 
 
     
@@ -564,4 +578,7 @@ def txt2img_function_prompt(id_task: str, request: gr.Request, *args):
 def txt2img_prompt(id_task: str, request: gr.Request, *args):
     wildcard_json.writeback_gallery_changes()
     print("txt2img prompt version")
-    return main_thread.run_and_wait_result(txt2img_function_prompt, id_task, request, *args)
+    if forge == True:
+        return main_thread.run_and_wait_result(txt2img_function_prompt, id_task, request, *args)
+    else:
+        return txt2img_function_prompt(id_task, request, *args)

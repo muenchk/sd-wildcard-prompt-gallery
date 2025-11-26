@@ -34,14 +34,19 @@ import scripts.wildcard_misc as wildcard_misc
 import scripts.wg_files as wg_files
 
 from modules.ui import ordered_ui_categories, calc_resolution_hires, update_token_counter, update_negative_prompt_token_counter, create_output_panel, switch_values_symbol
-from modules_forge.forge_canvas.canvas import ForgeCanvas, canvas_head
 from modules import ui_extra_networks, ui_toprow, progress, util, ui_tempdir, call_queue
 import modules.infotext_utils as parameters_copypaste
 from modules.infotext_utils import image_from_url_text, PasteField, parse_generation_parameters
 from contextlib import ExitStack
 from modules.call_queue import wrap_gradio_gpu_call, wrap_queued_call, wrap_gradio_call, wrap_gradio_call_no_job
 import modules.txt2img
-from modules_forge import main_entry, forge_space
+
+try:
+    from modules_forge import forge_version
+    from modules_forge import main_entry
+    forge = True
+except ImportError:
+    forge = False
 
 from modules.ui_common import OutputPanel, save_files
 import modules.ui as ui
@@ -97,7 +102,10 @@ def click_remove_all_images():
 
     return [], "", ""
 
-def get_image_list(gallery):
+image_num = 0
+
+def get_image_list(gallery:object) -> tuple[list[tuple[Image.Image, str]], str, str]:
+    global image_num
     images = []
     dir = wildcard_json.get_base_dir() / "galleries"
     for cap, img in gallery[wildcard_json.key_image_array].items():
@@ -106,13 +114,15 @@ def get_image_list(gallery):
 
     # build geninfo json data
     image_generation_info, image_generation_html = wildcard_misc.get_initial_generation_info(gallery[wildcard_json.key_image_array])
+    image_num = len(images)
     return images, image_generation_info, image_generation_html
 
-def add_image_to_gallery(image, upload_generation_info, dont_save_database=False):
+def get_upload_gen_info(upload_generation_info)-> object:
     
     params = parse_generation_parameters(upload_generation_info)
 
     image_details = {}
+    image_details[wildcard_json.key_prompt] = params["Prompt"] if "Prompt" in params else ""
     image_details[wildcard_json.key_all_prompts] = [params["Prompt"] if "Prompt" in params else ""]
     image_details[wildcard_json.key_all_negative_prompts] = [params["Negative prompt"] if "Negative prompt" in params else ""]
     image_details[wildcard_json.key_all_seeds] = [int(params["Seed"] if "Seed" in params else "0")]
@@ -143,43 +153,66 @@ def add_image_to_gallery(image, upload_generation_info, dont_save_database=False
     image_details[wildcard_json.key_is_using_inpainting_conditioning] = params["DEFIn"] if "DEFIn" in params else ""
     image_details[wildcard_json.key_version] = params["Version"] if "Version" in params else ""
 
-    wildcard_misc.save_image_to_gallery_intern((image, params["Prompt"]) if "Prompt" in params else image, image_details, 0, dont_save_database=dont_save_database)
+    return image_details
 
-def click_upload_add(image, upload_generation_info):
-    add_image_to_gallery(image, upload_generation_info)
+def add_image_to_gallery(image:Image.Image, upload_generation_info, dont_save_database=False) -> str:
+    image_details = get_upload_gen_info(upload_generation_info)
+    return wildcard_misc.save_image_to_gallery_intern((image, image_details[wildcard_json.key_prompt]) if image_details[wildcard_json.key_prompt] != "" else image, image_details, 0, dont_save_database=dont_save_database)
+
+def click_upload_add(image:Image.Image, upload_generation_info:str, images:list[tuple[Image.Image, str]], gen_info:str):
+    caption = add_image_to_gallery(image, upload_generation_info)
     # find gallery object
-    obj = wildcard_json.create_new_gallery(gallery_selected)
-    # get images
-    return get_image_list(obj)
+    gallery = wildcard_json.create_new_gallery(gallery_selected)
 
-def click_add_from_folder():
+    images.append((image, caption))
+    image_generation_info, image_generation_html = wildcard_misc.recalc_generation_info_add(caption, gallery[wildcard_json.key_image_array], gen_info)
+    return images, image_generation_info, image_generation_html
+
+def click_replace_add(upload_image:Image.Image, upload_generation_info:str, images:list[Image.Image]|list[tuple[Image.Image, str]], generation_info:str, infotext:str, img_index:int):
+    if img_index < 0 or img_index >= image_num:
+        return gr.update(), gr.update(), gr.update()
+    upload_generation_info = get_upload_gen_info(upload_generation_info)
+    images, caption = wildcard_misc.replace_image_in_gallery_inplace(images, generation_info, img_index, upload_image, upload_generation_info)
+
+    gallery = wildcard_json.create_new_gallery(gallery_selected)
+
+    image_generation_info, image_generation_html = wildcard_misc.recalc_generation_info_replace(img_index, caption,  gallery[wildcard_json.key_image_array], generation_info)
+
+    return images, image_generation_info, image_generation_html
+
+
+def click_add_from_folder(images, gen_info):
     folder = wg_files.get_folder_path("")
     print(folder)
     imgs = wildcard_misc.get_images_from_folder(folder)
+    captions:list[str] = []
     for img in imgs:
         html1, geninfo, html2 = wg_files.run_pnginfo(img)
-        add_image_to_gallery(img, geninfo, dont_save_database=True)
+        captions.append(add_image_to_gallery(img, geninfo, dont_save_database=True))
     
     if len(imgs) > 0:
         wildcard_json.write_to_config()
     # find gallery object
-    obj = wildcard_json.create_new_gallery(gallery_selected)
+    gallery = wildcard_json.create_new_gallery(gallery_selected)
     # get images
+    for i in range(len(imgs) if len(imgs) <= len(captions) else len(captions)):
+        images.append((imgs[i], captions[i]))
+    image_generation_info, image_generation_html = wildcard_misc.recalc_generation_info_add(captions, gallery[wildcard_json.key_image_array], gen_info)
+    return images, image_generation_info, image_generation_html
 
-    return get_image_list(obj)
-def click_add_from_file():
+def click_add_from_file(images, gen_info):
     file = wg_files.get_any_file_path("")
     print(file)
     # get the image
     img = Image.open(file, "r", None)
     html1, geninfo, html2 = wg_files.run_pnginfo(img)
 
-    return click_upload_add(img, geninfo)
+    return click_upload_add(img, geninfo, images, gen_info)
 
 from cProfile import Profile
 from pstats import SortKey, Stats
 
-def change_gallery_selection(gallery_selection):
+def change_gallery_selection(gallery_selection:str):
     if isinstance(gallery_selection, list):
         return "", "", "", "", 20, "Euler a", "SGM Uniform", -1, 896, 1152, 1, 5, 32, False, []
     global gallery_selected
@@ -191,11 +224,11 @@ def change_gallery_selection(gallery_selection):
     # return data 
     return gallery_selection, obj[wildcard_json.key_prompt], obj[wildcard_json.key_negative_prompt], obj[wildcard_json.key_sampling_steps], obj[wildcard_json.key_sampler], obj[wildcard_json.key_scheduler], obj[wildcard_json.key_seed], obj[wildcard_json.key_width], obj[wildcard_json.key_height], obj[wildcard_json.key_batch_count], obj[wildcard_json.key_batch_size], obj[wildcard_json.key_cfg], obj[wildcard_json.key_distilled_cfg], images, image_generation_info, image_generation_html
 
-def click_refresh_galleries(gallery_selection):
+def click_refresh_galleries(gallery_selection:str):
     refresh_galleries_()
     return gr.Dropdown.update(choices=galleries), *change_gallery_selection(gallery_selection)
 
-def click_add_gallery(gallery_name):
+def click_add_gallery(gallery_name:str):
     # add gallery to gallery list and update list
     wildcard_json.create_new_gallery(gallery_name)
     refresh_galleries_()
@@ -203,7 +236,7 @@ def click_add_gallery(gallery_name):
     gallery_selected = gallery_name
     return gr.Dropdown.update(choices=galleries), gallery_name
 
-def click_rename_gallery(gallery_name):
+def click_rename_gallery(gallery_name:str):
     global gallery_selected
     # just rename object in json, and get new galleries list
     wildcard_json.rename_gallery(gallery_selected, gallery_name)
@@ -211,25 +244,25 @@ def click_rename_gallery(gallery_name):
     gallery_selected = gallery_name
     return gr.Dropdown.update(choices=galleries), gallery_name
 
-def change_width(width):
+def change_width(width:int):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_width, width)
 
-def change_height(height):
+def change_height(height:int):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_height, height)
 
-def change_batch_count(batch_count):
+def change_batch_count(batch_count:int):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_batch_count, batch_count)
 
-def change_batch_size(batch_size):
+def change_batch_size(batch_size:int):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_batch_size, batch_size)
 def change_distilled_cfg_scale(distilled_cfg_scale):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_distilled_cfg, distilled_cfg_scale)
 def change_cfg_scale(cfg_scale):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_cfg, cfg_scale)
     return gr.update(interactive=(cfg_scale != 1))
-def change_prompt(prompt):
+def change_prompt(prompt:str):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_prompt, prompt)
-def change_negative_prompt(negative_prompt):
+def change_negative_prompt(negative_prompt:str):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_negative_prompt, negative_prompt)
 def change_steps(steps):
     wildcard_json.update_gallery_temp(gallery_selected, wildcard_json.key_sampling_steps, steps)
@@ -273,6 +306,7 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
                     with gr.Column():
                         upload_image = gr.Image(elem_id=f"{id_part}_upload_image", label="Upload image to gallery", source="upload", interactive=True, type="pil", height="100", width="100", image_mode="RGBA")
                         upload_add = gr.Button(value="Add to gallery", size='sm', elem_id=f"{id_part}_add_upload")
+                        replace_add = gr.Button(value="Replace selected", size='sm', elem_id=f"{id_part}_replace_add")
                     with gr.Column():
                         html = gr.HTML()
                         upload_generation_info = gr.Textbox(visible=False, elem_id=f"{id_part}upload_generation_info")
@@ -351,26 +385,27 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
                                         with FormRow(elem_id=f"{id_part}_hires_fix_row3", variant="compact", visible=shared.opts.hires_fix_show_sampler) as hr_checkpoint_container:
                                             hr_checkpoint_name = gr.Dropdown(label='Hires Checkpoint', elem_id="hr_checkpoint", choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True), value="Use same checkpoint", scale=2)
 
-                                            hr_checkpoint_refresh = ToolButton(value=refresh_symbol)
+                                            if (forge == True):
+                                                hr_checkpoint_refresh = ToolButton(value=refresh_symbol)
 
-                                            def get_additional_modules():
-                                                modules_list = ['Use same choices']
-                                                if main_entry.module_list == {}:
-                                                    _, modules = main_entry.refresh_models()
-                                                    modules_list += list(modules)
-                                                else:
-                                                    modules_list += list(main_entry.module_list.keys())
-                                                return modules_list
+                                                def get_additional_modules():
+                                                    modules_list = ['Use same choices']
+                                                    if main_entry.module_list == {}:
+                                                        _, modules = main_entry.refresh_models()
+                                                        modules_list += list(modules)
+                                                    else:
+                                                        modules_list += list(main_entry.module_list.keys())
+                                                    return modules_list
 
-                                            modules_list = get_additional_modules()
-
-                                            def refresh_model_and_modules():
                                                 modules_list = get_additional_modules()
-                                                return gr.update(choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True)), gr.update(choices=modules_list)
 
-                                            hr_additional_modules = gr.Dropdown(label='Hires VAE / Text Encoder', elem_id="hr_vae_te", choices=modules_list, value=["Use same choices"], multiselect=True, scale=3)
+                                                def refresh_model_and_modules():
+                                                    modules_list = get_additional_modules()
+                                                    return gr.update(choices=["Use same checkpoint"] + modules.sd_models.checkpoint_tiles(use_short=True)), gr.update(choices=modules_list)
 
-                                            hr_checkpoint_refresh.click(fn=refresh_model_and_modules, outputs=[hr_checkpoint_name, hr_additional_modules], show_progress=False)
+                                                hr_additional_modules = gr.Dropdown(label='Hires VAE / Text Encoder', elem_id="hr_vae_te", choices=modules_list, value=["Use same choices"], multiselect=True, scale=3)
+
+                                                hr_checkpoint_refresh.click(fn=refresh_model_and_modules, outputs=[hr_checkpoint_name, hr_additional_modules], show_progress=False)
 
                                         with FormRow(elem_id=f"{id_part}_hires_fix_row3b", variant="compact", visible=shared.opts.hires_fix_show_sampler) as hr_sampler_container:
                                             hr_sampler_name = gr.Dropdown(label='Hires sampling method', elem_id="hr_sampler", choices=["Use same sampler"] + sd_samplers.visible_sampler_names(), value="Use same sampler")
@@ -435,18 +470,24 @@ def create_prompt_gallery_ui(blocks, tab, id_part):
     )
     add_from_folder.click(
         fn=click_add_from_folder,
-        inputs=[],
+        inputs=[output_panel.gallery, output_panel.generation_info],
         outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
     )
     add_from_file.click(
         fn=click_add_from_file,
-        inputs=[],
+        inputs=[output_panel.gallery, output_panel.generation_info],
         outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
     )
     upload_add.click(
         fn=click_upload_add,
-        inputs=[upload_image, upload_generation_info],
+        inputs=[upload_image, upload_generation_info, output_panel.gallery, output_panel.generation_info],
         outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext]
+    )
+    replace_add.click(
+        fn=click_replace_add,
+        _js="function(u, v, w, x, y, z){ return [u, v, w, x, y, selected_gallery_index()] }",
+        inputs=[upload_image,  upload_generation_info, output_panel.gallery, output_panel.generation_info, output_panel.infotext, output_panel.infotext],
+        outputs=[output_panel.gallery, output_panel.generation_info, output_panel.infotext],
     )
 
     steps = wildcard_txt2img.scripts_gallery.script('Sampler').steps

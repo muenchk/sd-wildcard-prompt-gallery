@@ -32,14 +32,12 @@ import scripts.wildcard_data as wildcard_data
 import scripts.wildcard_toprow as wildcard_toprow
 
 from modules.ui import ordered_ui_categories, calc_resolution_hires, update_token_counter, update_negative_prompt_token_counter, create_output_panel, switch_values_symbol
-from modules_forge.forge_canvas.canvas import ForgeCanvas, canvas_head
 from modules import ui_extra_networks, ui_toprow, progress, util, ui_tempdir, call_queue
 import modules.infotext_utils as parameters_copypaste
 from modules.infotext_utils import image_from_url_text, PasteField
 from contextlib import ExitStack
 from modules.call_queue import wrap_gradio_gpu_call, wrap_queued_call, wrap_gradio_call
 import modules.txt2img
-from modules_forge import main_entry, forge_space
 
 from modules.ui_common import OutputPanel, save_files
 import modules.ui as ui
